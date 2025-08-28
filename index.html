@@ -26,27 +26,41 @@
     <div>💣 폭탄 <span id="bomb">0</span></div>
     <div id="bossHud" style="display:none">👑 보스 HP <span id="bossHp">0</span>/<span id="bossMax">0</span></div>
   </div>
+
   <div class="overlay" id="start">
     <div>
       <h1>👾 모바일 갤러그</h1>
       <p>드래그 = 이동 + 자동사격<br>더블탭 = 폭탄</p>
-      <button onclick="startGame()">탭하여 시작</button>
+      <button id="startBtn">탭하여 시작</button>
     </div>
   </div>
+
   <div class="overlay" id="gameover" style="display:none">
     <div>
       <h1 id="overTitle">게임 오버</h1>
       <p>점수: <span id="finalScore"></span> | 최고: <span id="finalHi"></span></p>
-      <button onclick="startGame()">다시 시작</button>
+      <button id="retryBtn">다시 시작</button>
     </div>
   </div>
+
 <script>
-const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");let W,H,DPR=1;function resize(){DPR=Math.min(window.devicePixelRatio||1,2);W=canvas.width=Math.floor(window.innerWidth*DPR);H=canvas.height=Math.floor(window.innerHeight*DPR);}resize();window.addEventListener("resize",resize);
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");let W,H,DPR=1;
+function resize(){DPR=Math.min(window.devicePixelRatio||1,2);W=canvas.width=Math.floor(window.innerWidth*DPR);H=canvas.height=Math.floor(window.innerHeight*DPR);}
+resize();window.addEventListener("resize",resize);
 
 // ---------------- Core State ----------------
 let game,player,enemies=[],bullets=[],items=[],boss=null,lastTap=0,laserFlash=0,dragging=false;
 // FX
-let screenFlash=0; const shockwaves=[]; const particles=[]; const floatTexts=[]; // {x,y,ax,ay,life,col,size}
+let screenFlash=0; const shockwaves=[]; const particles=[]; const floatTexts=[]; // {x,y,life,col,size}
+
+// Safe start binders (CSP-friendly)
+document.getElementById('startBtn').addEventListener('click', () => startGame());
+document.getElementById('retryBtn').addEventListener('click', () => startGame());
+// 폴백: 캔버스를 첫 탭하면 시작
+let firstTapStarted=false;
+canvas.addEventListener('pointerdown', () => {
+  if (!game && !firstTapStarted) { firstTapStarted=true; startGame(); }
+}, { once:true });
 
 function startGame(){
   document.getElementById("start").style.display="none";
@@ -90,61 +104,113 @@ function dropItem(x,y){ if(Math.random()<0.2){ let types=["SPREAD","PIERCE","RAP
 function grantItem(t){ if(t==="BOMB"){ player.bombs++; } else { player.weapon=t; player.timer=t==="LASER"?12:15; player.fireDelay=t==="RAPID"?0.06:0.12; } updateHUD(); popText(player.x,player.y-20*DPR,t==="BOMB"?"+BOMB":t,"#fff"); }
 
 // ---------------- Bullets ----------------
-function makeBullet(x,y,vx,vy,owner,extra={}){ return {x,y,w:4*DPR,h:10*DPR,vx,vy,owner:owner,homing:false,pierce:false,age:0,hueBase:extra.hueBase||0}; }
-function fire(){ if(player.cooldown>0) return; const baseVy=-400*DPR; if(player.weapon==="LASER"){ // beam instant
+function makeBullet(x,y,vx,vy,owner,extra={}){ return {x,y,w:4*DPR,h:10*DPR,vx,vy,owner,homing:false,pierce:!!extra.pierce,age:0,hueBase:extra.hueBase||0}; }
+function fire(){
+  if(player.cooldown>0) return;
+  const baseVy=-400*DPR;
+  if(player.weapon==="LASER"){ // beam instant
     laserFlash=0.14; beamDamage();
-  } else if(player.weapon==="HOMING"){ for(let k=-1;k<=1;k+=2) bullets.push({x:player.x+k*8*DPR,y:player.y,w:4*DPR,h:10*DPR,vx:0,vy:-280*DPR,owner:'p',homing:true,age:0}); }
-  else if(player.weapon==="SPREAD"){ bullets.push(makeBullet(player.x,player.y, -120*DPR, baseVy*0.95,'p')); bullets.push(makeBullet(player.x,player.y, 0, baseVy,'p')); bullets.push(makeBullet(player.x,player.y, 120*DPR, baseVy*0.95,'p')); }
-  else { bullets.push(makeBullet(player.x,player.y,0, baseVy,'p',{pierce:player.weapon==="PIERCE"})); }
-  player.cooldown=player.fireDelay; }
+  } else if(player.weapon==="HOMING"){
+    for(let k=-1;k<=1;k+=2) bullets.push({x:player.x+k*8*DPR,y:player.y,w:4*DPR,h:10*DPR,vx:0,vy:-280*DPR,owner:'p',homing:true,age:0});
+  } else if(player.weapon==="SPREAD"){
+    bullets.push(makeBullet(player.x,player.y, -120*DPR, baseVy*0.95,'p'));
+    bullets.push(makeBullet(player.x,player.y, 0, baseVy,'p'));
+    bullets.push(makeBullet(player.x,player.y, 120*DPR, baseVy*0.95,'p'));
+  } else {
+    bullets.push(makeBullet(player.x,player.y,0, baseVy,'p',{pierce:player.weapon==="PIERCE"}));
+  }
+  player.cooldown=player.fireDelay;
+}
 function beamDamage(){ // apply damage line to boss/enemies + FX
-  const x=player.x, y1=0, y2=player.y; // boss
-  if(boss && x>boss.x && x<boss.x+boss.w && y1<boss.y+boss.h && y2>boss.y){ let dmg=30; boss.hp-=dmg; hitFX(x,boss.y+boss.h/2,true,dmg); if(boss.hp<=0){ killBoss(); } }
-  enemies.forEach(e=>{ if(!e.alive) return; if(x>e.x && x<e.x+e.w && e.y<y2){ e.alive=false; game.score+=10; enemyExplode(e.x+e.w/2,e.y+e.h/2); dropItem(e.x+e.w/2,e.y+e.h/2); }});
+  const x=player.x, y1=0, y2=player.y;
+  if(boss && x>boss.x && x<boss.x+boss.w && y1<boss.y+boss.h && y2>boss.y){
+    let dmg=30; boss.hp-=dmg; hitFX(x,boss.y+boss.h/2,true,dmg); if(boss.hp<=0){ killBoss(); }
+  }
+  enemies.forEach(e=>{
+    if(!e.alive) return;
+    if(x>e.x && x<e.x+e.w && e.y<y2){
+      e.alive=false; game.score+=10;
+      enemyExplode(e.x+e.w/2,e.y+e.h/2); dropItem(e.x+e.w/2,e.y+e.h/2);
+    }
+  });
 }
 
 // ---------------- Collisions ----------------
-function rectHit(a,b){ return a.x-a.w/2 < b.x && a.x+a.w/2 > b.x-b.w && a.y-a.h/2 < b.y && a.y+a.h/2 > b.y-b.h; }
+function pointInRect(x,y,r){ return x>r.x && x<r.x+r.w && y>r.y && y<r.y+r.h; }
+function boxOverlapPoint(b,x,y){ return x>b.x && x<b.x+b.w && y>b.y && y<b.y+b.h; }
+function nearestEnemy(x,y){ let best=null,bd=1e9; for(const e of enemies){ if(!e.alive) continue; const ex=e.x+e.w/2, ey=e.y+e.h/2; const d=Math.hypot(ex-x,ey-y); if(d<bd){bd=d; best={x:ex,y:ey};} } return best; }
 
 function updateBullets(dt){
-  for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i]; b.age+=dt; // homing steer
-    if(b.owner==='p' && b.homing){ const target = boss? {x:boss.x+boss.w/2,y:boss.y+boss.h/2} : nearestEnemy(b.x,b.y); if(target){ const spd=Math.hypot(b.vx,b.vy)||200*DPR; const v=aimVec(b.x,b.y,target.x,target.y,spd); const turn=6*dt; b.vx=b.vx*(1-turn)+v.vx*turn; b.vy=b.vy*(1-turn)+v.vy*turn; } }
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];
+    b.age+=dt;
+    if(b.owner==='p' && b.homing){
+      const target = boss? {x:boss.x+boss.w/2,y:boss.y+boss.h/2} : nearestEnemy(b.x,b.y);
+      if(target){ const spd=Math.hypot(b.vx,b.vy)||200*DPR; const v=aimVec(b.x,b.y,target.x,target.y,spd); const turn=6*dt; b.vx=b.vx*(1-turn)+v.vx*turn; b.vy=b.vy*(1-turn)+v.vy*turn; }
+    }
     b.x+=b.vx*dt; b.y+=b.vy*dt;
-    // lifetime / out of bounds
+
     if(b.y<-40*DPR || b.y>H+40*DPR || b.x<-40*DPR || b.x>W+40*DPR){ bullets.splice(i,1); continue; }
-    // collisions
+
     if(b.owner==='p'){
-      if(boss && boxOverlapPoint(boss,b.x,b.y)){ boss.hp -= 10; hitFX(b.x,b.y,true,10); if(boss.hp<=0){ killBoss(); } if(player.weapon!=="PIERCE") { bullets.splice(i,1); continue; } }
-      for(const e of enemies){ if(!e.alive) continue; if(pointInRect(b.x,b.y,e)){ e.alive=false; game.score+=10; if(player.weapon!=="PIERCE") bullets.splice(i,1); enemyExplode(e.x+e.w/2,e.y+e.h/2); dropItem(e.x+e.w/2,e.y+e.h/2); break; }
+      if(boss && boxOverlapPoint(boss,b.x,b.y)){
+        boss.hp -= 10; hitFX(b.x,b.y,true,10);
+        if(boss.hp<=0){ killBoss(); }
+        if(!b.pierce){ bullets.splice(i,1); continue; }
+      }
+      for(const e of enemies){
+        if(!e.alive) continue;
+        if(pointInRect(b.x,b.y,e)){
+          e.alive=false; game.score+=10; if(!b.pierce) bullets.splice(i,1);
+          enemyExplode(e.x+e.w/2,e.y+e.h/2); dropItem(e.x+e.w/2,e.y+e.h/2); break;
+        }
       }
     }
   }
 }
-function pointInRect(x,y,r){ return x>r.x && x<r.x+r.w && y>r.y && y<r.y+r.h; }
-function boxOverlapPoint(b,x,y){ return x>b.x && x<b.x+b.w && y>b.y && y<b.y+b.h; }
-function nearestEnemy(x,y){ let best=null,bd=1e9; for(const e of enemies){ if(!e.alive) continue; const ex=e.x+e.w/2, ey=e.y+e.h/2; const d=Math.hypot(ex-x,ey-y); if(d<bd){bd=d; best={x:ex,y:ey};} } return best; }
+
 function killBoss(){ game.score+=300+game.stage*50; enemyExplode(boss.x+boss.w/2,boss.y+boss.h/2, 40); boss=null; game.inBoss=false; nextStage(); }
 
 // ---------------- FX Helpers ----------------
 function popText(x,y,txt,col="#ff0",size=10*DPR){ floatTexts.push({x,y,txt,life:1,col,size}); }
-function enemyExplode(x,y,count=24){ // particles burst
-  for(let i=0;i<count;i++){ const ang=Math.random()*Math.PI*2; const sp= (40+Math.random()*120)*DPR; particles.push({x,y,vx:Math.cos(ang)*sp,vy:Math.sin(ang)*sp,life:0.9+Math.random()*0.4,col:`hsl(${(Math.random()*60+10)|0} 90% 60%)`,size:(1+Math.random()*2)*DPR}); }
+function enemyExplode(x,y,count=24){
+  for(let i=0;i<count;i++){
+    const ang=Math.random()*Math.PI*2; const sp=(40+Math.random()*120)*DPR;
+    particles.push({x,y,vx:Math.cos(ang)*sp,vy:Math.sin(ang)*sp,life:0.9+Math.random()*0.4,col:`hsl(${(Math.random()*60+10)|0} 90% 60%)`,size:(1+Math.random()*2)*DPR});
+  }
 }
-function hitFX(x,y,isBoss=false,dmg=0){ for(let i=0;i<12;i++){ const ang=Math.random()*Math.PI*2; const sp=(60+Math.random()*160)*DPR; particles.push({x,y,vx:Math.cos(ang)*sp,vy:Math.sin(ang)*sp,life:0.3+Math.random()*0.4,col:isBoss?"#ff99cc":"#ffd166",size:(1+Math.random()*2)*DPR}); } if(dmg) popText(x,y-10*DPR,`-${dmg}`,"#ff7ab6",12*DPR); updateHUD(); }
+function hitFX(x,y,isBoss=false,dmg=0){
+  for(let i=0;i<12;i++){
+    const ang=Math.random()*Math.PI*2; const sp=(60+Math.random()*160)*DPR;
+    particles.push({x,y,vx:Math.cos(ang)*sp,vy:Math.sin(ang)*sp,life:0.3+Math.random()*0.4,col:isBoss?"#ff99cc":"#ffd166",size:(1+Math.random()*2)*DPR});
+  }
+  if(dmg) popText(x,y-10*DPR,`-${dmg}`,"#ff7ab6",12*DPR);
+  updateHUD();
+}
 function addShockwave(x,y){ shockwaves.push({x,y,r:0,life:0.5}); }
 
 // ---------------- Bomb ----------------
-function detonateBomb(){ if(player.bombs<=0) return; player.bombs--; screenFlash=0.5; addShockwave(player.x,player.y-10*DPR); // clear enemy bullets
+function detonateBomb(){
+  if(player.bombs<=0) return;
+  player.bombs--; screenFlash=0.5; addShockwave(player.x,player.y-10*DPR);
   for(let i=bullets.length-1;i>=0;i--){ if(bullets[i].owner!=='p') bullets.splice(i,1); }
-  // boss damage small percent
-  if(boss){ const dealt=Math.floor(boss.maxHp*0.08); boss.hp=Math.max(0,boss.hp-dealt); hitFX(boss.x+boss.w/2,boss.y+boss.h/2,true,dealt); if(boss.hp<=0) killBoss(); }
-  // particles burst across screen
-  for(let k=0;k<60;k++){ particles.push({x:Math.random()*W,y:Math.random()*H*0.6,vx:(Math.random()-0.5)*80*DPR,vy:(Math.random()-0.5)*80*DPR,life:0.6+Math.random()*0.6,col:"rgba(255,255,255,0.8)",size:(1+Math.random()*2)*DPR}); }
+  if(boss){
+    const dealt=Math.floor(boss.maxHp*0.08);
+    boss.hp=Math.max(0,boss.hp-dealt); hitFX(boss.x+boss.w/2,boss.y+boss.h/2,true,dealt);
+    if(boss.hp<=0) killBoss();
+  }
+  for(let k=0;k<60;k++){
+    particles.push({x:Math.random()*W,y:Math.random()*H*0.6,vx:(Math.random()-0.5)*80*DPR,vy:(Math.random()-0.5)*80*DPR,life:0.6+Math.random()*0.6,col:"rgba(255,255,255,0.8)",size:(1+Math.random()*2)*DPR});
+  }
   updateHUD();
 }
 
 // ---------------- Input ----------------
-canvas.addEventListener("pointerdown",e=>{ const now=performance.now(); if(now-lastTap<280){ detonateBomb(); lastTap=0; return; } lastTap=now; dragging=true; });
+canvas.addEventListener("pointerdown",e=>{
+  const now=performance.now();
+  if(now-lastTap<280){ detonateBomb(); lastTap=0; return; }
+  lastTap=now; dragging=true;
+});
 window.addEventListener("pointerup",()=>dragging=false);
 window.addEventListener("pointermove",e=>{ if(!dragging) return; const x=e.clientX*DPR; player.x=Math.max(20*DPR,Math.min(W-20*DPR,x)); });
 
@@ -158,51 +224,69 @@ function aimVec(sx,sy,tx,ty,spd){ const dx=tx-sx, dy=ty-sy; const d=Math.hypot(d
 
 // ---------------- Render ----------------
 function draw(){ ctx.clearRect(0,0,W,H);
-  // star field (simple)
   ctx.fillStyle="#02040a"; ctx.fillRect(0,0,W,H);
-  // player
-  if(!(player.inv>0 && ((performance.now()/60|0)%2===0))){ ctx.fillStyle="#7fd8ff"; ctx.fillRect(player.x-player.w/2,player.y-player.h/2,player.w,player.h); }
-  // enemies
+  if(!(player?.inv>0 && ((performance.now()/60|0)%2===0))){ ctx.fillStyle="#7fd8ff"; ctx.fillRect(player.x-player.w/2,player.y-player.h/2,player.w,player.h); }
   ctx.fillStyle="#8ef06a"; enemies.forEach(e=>{ if(e.alive) ctx.fillRect(e.x, e.y, e.w, e.h); });
-  // boss
   if(boss){ ctx.fillStyle="#ff4b6e"; ctx.fillRect(boss.x,boss.y,boss.w,boss.h); }
-  // bullets (animated color for enemy)
-  for(const b of bullets){ if(b.owner==='e'){ const hue=(b.hueBase + b.age*240)%360; ctx.fillStyle=`hsl(${hue} 90% 60%)`; } else ctx.fillStyle="#ffd166"; ctx.fillRect(b.x-2*DPR,b.y-5*DPR,4*DPR,10*DPR); }
-  // items
-  for(const it of items){ ctx.fillStyle='rgba(255,255,255,.15)'; ctx.beginPath(); ctx.arc(it.x,it.y,10*DPR,0,Math.PI*2); ctx.fill(); ctx.fillStyle = it.type==='SPREAD' ? '#ffd166' : it.type==='PIERCE' ? '#9cff7a' : it.type==='RAPID' ? '#67b8ff' : it.type==='LASER' ? '#ff9bd7' : it.type==='HOMING' ? '#b4ff9b' : '#ffffff'; ctx.beginPath(); ctx.arc(it.x,it.y,7*DPR,0,Math.PI*2); ctx.fill(); }
-  // laser beam
-  if(laserFlash>0){ const x=player.x, y0=0, y1=player.y; const g=ctx.createLinearGradient(x,y0,x,y1); g.addColorStop(0,'rgba(255,255,255,0)'); g.addColorStop(0.2,'rgba(255,160,240,0.6)'); g.addColorStop(1,'rgba(255,80,200,1)'); ctx.strokeStyle=g; ctx.lineWidth=6*DPR; ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y1); ctx.stroke(); ctx.globalCompositeOperation='lighter'; ctx.lineWidth=2*DPR; ctx.strokeStyle='rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y1); ctx.stroke(); ctx.globalCompositeOperation='source-over'; }
-  // shockwaves
-  for(const sw of shockwaves){ const a=Math.max(0, sw.life*2-0.2); ctx.strokeStyle=`rgba(255,255,255,${a})`; ctx.lineWidth=3*DPR; ctx.beginPath(); ctx.arc(sw.x,sw.y, sw.r, 0, Math.PI*2); ctx.stroke(); }
-  // particles
+  for(const b of bullets){
+    if(b.owner==='e'){ const hue=(b.hueBase + b.age*240)%360; ctx.fillStyle=`hsl(${hue} 90% 60%)`; } else ctx.fillStyle="#ffd166";
+    ctx.fillRect(b.x-2*DPR,b.y-5*DPR,4*DPR,10*DPR);
+  }
+  for(const it of items){
+    ctx.fillStyle='rgba(255,255,255,.15)'; ctx.beginPath(); ctx.arc(it.x,it.y,10*DPR,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = it.type==='SPREAD' ? '#ffd166' : it.type==='PIERCE' ? '#9cff7a' : it.type==='RAPID' ? '#67b8ff' : it.type==='LASER' ? '#ff9bd7' : it.type==='HOMING' ? '#b4ff9b' : '#ffffff';
+    ctx.beginPath(); ctx.arc(it.x,it.y,7*DPR,0,Math.PI*2); ctx.fill();
+  }
+  if(laserFlash>0){
+    const x=player.x, y0=0, y1=player.y; const g=ctx.createLinearGradient(x,y0,x,y1);
+    g.addColorStop(0,'rgba(255,255,255,0)'); g.addColorStop(0.2,'rgba(255,160,240,0.6)'); g.addColorStop(1,'rgba(255,80,200,1)');
+    ctx.strokeStyle=g; ctx.lineWidth=6*DPR; ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y1); ctx.stroke();
+    ctx.globalCompositeOperation='lighter'; ctx.lineWidth=2*DPR; ctx.strokeStyle='rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y1); ctx.stroke(); ctx.globalCompositeOperation='source-over';
+  }
+  for(const sw of shockwaves){
+    const a=Math.max(0, sw.life*2-0.2); ctx.strokeStyle=`rgba(255,255,255,${a})`; ctx.lineWidth=3*DPR; ctx.beginPath(); ctx.arc(sw.x,sw.y, sw.r, 0, Math.PI*2); ctx.stroke();
+  }
   for(const p of particles){ ctx.fillStyle=p.col; ctx.fillRect(p.x, p.y, p.size, p.size); }
-  // floating texts
   for(const ft of floatTexts){ ctx.fillStyle=ft.col; ctx.font = `${ft.size}px sans-serif`; ctx.textAlign='center'; ctx.fillText(ft.txt, ft.x, ft.y); }
-  // screen flash overlay
   if(screenFlash>0){ ctx.fillStyle=`rgba(255,255,255,${Math.min(0.6,screenFlash)})`; ctx.fillRect(0,0,W,H); }
 }
 
 // ---------------- Main Loop ----------------
-let last=0; function loop(ts){ if(!last) last=ts; const dt=Math.min(0.033,(ts-last)/1000); last=ts; if(!game||game.over){ draw(); requestAnimationFrame(loop); return; }
-  if(dragging) fire(); if(player.cooldown>0) player.cooldown-=dt; if(player.timer>0){ player.timer-=dt; if(player.timer<=0){ player.weapon='NORMAL'; } }
-  // enemies step (simple sway)
+let last=0;
+function loop(ts){
+  if(!last) last=ts; const dt=Math.min(0.033,(ts-last)/1000); last=ts;
+  if(!game||game.over){ draw(); requestAnimationFrame(loop); return; }
+
+  if(dragging) fire();
+  if(player.cooldown>0) player.cooldown-=dt;
+  if(player.timer>0){ player.timer-=dt; if(player.timer<=0){ player.weapon='NORMAL'; } }
+
   let aliveExist=false; for(const e of enemies){ if(!e.alive) continue; aliveExist=true; e.x += Math.sin(ts*0.001 + e.row)*10*DPR*dt; }
   if(!aliveExist) trySpawnBoss();
-  // boss move & shoot
-  if(boss){ boss.phase = boss.hp/boss.maxHp<=0.5?1:0; boss.x += (80*DPR*(boss.phase?1.2:1)) * boss.dir * dt; if(boss.x<10*DPR || boss.x+boss.w>W-10*DPR){ boss.dir*=-1; boss.y+=8*DPR; }
+
+  if(boss){
+    boss.phase = boss.hp/boss.maxHp<=0.5?1:0;
+    boss.x += (80*DPR*(boss.phase?1.2:1)) * boss.dir * dt;
+    if(boss.x<10*DPR || boss.x+boss.w>W-10*DPR){ boss.dir*=-1; boss.y+=8*DPR; }
     boss.shot += dt; const rate=(0.8 - game.stage*0.05)/(boss.phase?1.25:1); if(boss.shot>Math.max(0.22,rate)){ boss.shot=0; bossShoot(); }
   }
-  // bullets
+
   updateBullets(dt);
-  // items fall & pickup
-  for(let i=items.length-1;i>=0;i--){ const it=items[i]; it.y+=it.vy*dt; if(it.y>H+20*DPR){ items.splice(i,1); continue; } const hit = Math.abs(it.x-player.x)<(player.w*0.6) && Math.abs(it.y-player.y)<(player.h*0.6); if(hit){ grantItem(it.type); items.splice(i,1); }}
-  // FX updates
+
+  for(let i=items.length-1;i>=0;i--){
+    const it=items[i]; it.y+=it.vy*dt;
+    if(it.y>H+20*DPR){ items.splice(i,1); continue; }
+    const hit = Math.abs(it.x-player.x)<(player.w*0.6) && Math.abs(it.y-player.y)<(player.h*0.6);
+    if(hit){ grantItem(it.type); items.splice(i,1); }
+  }
+
   for(let i=shockwaves.length-1;i>=0;i--){ const sw=shockwaves[i]; sw.r += 900*DPR*dt; sw.life-=dt; if(sw.life<=0) shockwaves.splice(i,1); }
   for(let i=particles.length-1;i>=0;i--){ const p=particles[i]; p.x+=p.vx*dt; p.y+=p.vy*dt; p.vx*=0.98; p.vy*=0.98; p.life-=dt; if(p.life<=0) particles.splice(i,1); }
   for(let i=floatTexts.length-1;i>=0;i--){ const f=floatTexts[i]; f.y-=40*dt*DPR; f.life-=dt; if(f.life<=0) floatTexts.splice(i,1); }
   if(laserFlash>0) laserFlash-=dt; if(screenFlash>0) screenFlash-=dt*1.8;
 
-  updateHUD(); draw(); requestAnimationFrame(loop); }
+  updateHUD(); draw(); requestAnimationFrame(loop);
+}
 requestAnimationFrame(loop);
 </script>
 </body>
