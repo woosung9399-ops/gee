@@ -186,7 +186,8 @@
     if(Math.random() < chance){
       const types = ['SPREAD','PIERCE','RAPID'];
       const t = types[(Math.random()*types.length)|0];
-      items.push({x:x, y:y, w:14*DPR, h:14*DPR, vy: 70*DPR, type:t});
+      // 변경: 아이템 낙하 속도 더 빠르게
+      items.push({x:x, y:y, w:14*DPR, h:14*DPR, vy: 120*DPR, type:t});
     }
   }
 
@@ -214,98 +215,216 @@
   // Enemy shots with patterns (spread/zigzag/aimed)
   function enemyShoot(from){
     const s = game.stage;
-    const base = 240*DPR + s*16*DPR;
+    // 변경: 난이도별 적 탄속 가속 강화
+    const base = (240 + s*40) * DPR;
     const pattern = Math.floor(Math.random()*3); // 0 spread, 1 zigzag, 2 aimed
     if(pattern===0){
-      for(let a=-0.25; a<=0.25; a+=0.25){ bullets.push({x:from.x + from.w*0.5, y:from.y + from.h, w:4*DPR, h:10*DPR, vx:Math.sin(a)*base, vy:Math.cos(a)*base, owner:'enemy'}); }
+      for(let a=-0.25; a<=0.25; a+=0.25){
+        bullets.push({x:from.x + from.w*0.5, y:from.y + from.h, w:4*DPR, h:10*DPR, vx:Math.sin(a)*base, vy:Math.cos(a)*base, owner:'enemy'});
+      }
     } else if(pattern===1){
-      // zigzag: give vx that flips later in update via vy check (simple sine drift simulated by vx)
-      const vx = (Math.random()<0.5?-1:1) * (80 + s*6) * DPR; bullets.push({x:from.x + from.w*0.5, y:from.y + from.h, w:4*DPR, h:10*DPR, vx, vy:base*0.9, owner:'enemy', zig:1});
+      // zigzag
+      const vx = (Math.random()<0.5?-1:1) * (80 + s*6) * DPR;
+      bullets.push({x:from.x + from.w*0.5, y:from.y + from.h, w:4*DPR, h:10*DPR, vx, vy:base*0.9, owner:'enemy', zig:1});
     } else {
-      const V = aimVec(from.x + from.w*0.5, from.y + from.h, player.x, player.y, base*1.05); bullets.push({x:from.x + from.w*0.5, y:from.y + from.h, w:4*DPR, h:10*DPR, vx:V.vx, vy:V.vy, owner:'enemy'});
+      const V = aimVec(from.x + from.w*0.5, from.y + from.h, player.x, player.y, base*1.05);
+      bullets.push({x:from.x + from.w*0.5, y:from.y + from.h, w:4*DPR, h:10*DPR, vx:V.vx, vy:V.vy, owner:'enemy'});
     }
     beep(260,0.06,0.035);
   }
 
   // Boss patterns: ring / spiral / aimed burst / sweep arcs
-  function bossShoot(){ if(!boss) return; const s = game.stage; const cx = boss.x + boss.w*0.5; const cy = boss.y + boss.h*0.5; boss.angle += 0.25 + s*0.02; const pick = (s % 4); const speedBase = (220 + s*22) * DPR; switch(pick){
+  function bossShoot(){
+    if(!boss) return;
+    const s = game.stage;
+    const cx = boss.x + boss.w*0.5;
+    const cy = boss.y + boss.h*0.5;
+    boss.angle += 0.25 + s*0.02;
+    const pick = (s % 4);
+    // 변경: 난이도별 보스 탄속 가속 강화
+    const speedBase = (220 + s*35) * DPR;
+    switch(pick){
       case 1: // spiral (continuous)
-        for(let k=0;k<4;k++){ const ang = (boss.angle + k*0.5); const vx = Math.sin(ang)*speedBase, vy=Math.cos(ang)*speedBase; bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'}); }
+        for(let k=0;k<4;k++){
+          const ang = (boss.angle + k*0.5);
+          const vx = Math.sin(ang)*speedBase, vy=Math.cos(ang)*speedBase;
+          bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});
+        }
         break;
       case 2: // aimed burst at player
-        for(let i=0;i<3+Math.floor(s*0.3);i++){ const spread = (-0.18 + (i/Math.max(1,2+Math.floor(s*0.3)))*0.36); const V = aimVec(cx, cy, player.x, player.y, speedBase); const vx = V.vx + Math.sin(spread)*80*DPR; const vy = V.vy + Math.cos(spread)*40*DPR; bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});} 
+        for(let i=0;i<3+Math.floor(s*0.3);i++){
+          const spread = (-0.18 + (i/Math.max(1,2+Math.floor(s*0.3)))*0.36);
+          const V = aimVec(cx, cy, player.x, player.y, speedBase);
+          const vx = V.vx + Math.sin(spread)*80*DPR; const vy = V.vy + Math.cos(spread)*40*DPR;
+          bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});
+        }
         break;
-      case 3: // sweep arcs (two fans left/right)
-        for(let a=-0.5;a<=0.5;a+=0.1){ const ang = a + Math.sin(boss.angle*0.5)*0.4; const vx=Math.sin(ang)*speedBase*0.95, vy=Math.cos(ang)*speedBase*0.95; bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});} 
+      case 3: // sweep arcs
+        for(let a=-0.5;a<=0.5;a+=0.1){
+          const ang = a + Math.sin(boss.angle*0.5)*0.4;
+          const vx=Math.sin(ang)*speedBase*0.95, vy=Math.cos(ang)*speedBase*0.95;
+          bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});
+        }
         break;
       default: // ring
-        const n = 10 + Math.floor(s*0.5); for(let i=0;i<n;i++){ const ang = (i/n)*Math.PI*2; const vx=Math.sin(ang)*speedBase*0.9, vy=Math.cos(ang)*speedBase*0.9; bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});} 
+        const n = 10 + Math.floor(s*0.5);
+        for(let i=0;i<n;i++){
+          const ang = (i/n)*Math.PI*2;
+          const vx=Math.sin(ang)*speedBase*0.9, vy=Math.cos(ang)*speedBase*0.9;
+          bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});
+        }
     }
     beep(180,0.08,0.05);
   }
 
-  function killEnemy(e, worldX, worldY){ e.alive=false; game.score += 10 + Math.floor((8 - e.row) * 0.5); elScore.textContent = game.score; maybeDropItem(worldX, worldY); beep(520,0.05,0.05); }
-  function hitPlayer(){ if(player.invul>0) return; game.lives--; refreshLives(); if(game.lives<=0){ gameOver(); return; } player.invul = 1.6; player.blink = 0; beep(120,0.18,0.04); for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i]; if(b.owner!=='player' && b.y>player.y-60*DPR) bullets.splice(i,1); } }
+  function killEnemy(e, worldX, worldY){
+    e.alive=false;
+    game.score += 10 + Math.floor((8 - e.row) * 0.5);
+    elScore.textContent = game.score;
+    maybeDropItem(worldX, worldY);
+    beep(520,0.05,0.05);
+  }
+  function hitPlayer(){
+    if(player.invul>0) return;
+    game.lives--;
+    refreshLives();
+    if(game.lives<=0){ gameOver(); return; }
+    player.invul = 1.6; player.blink = 0;
+    beep(120,0.18,0.04);
+    for(let i=bullets.length-1;i>=0;i--){
+      const b=bullets[i]; if(b.owner!=='player' && b.y>player.y-60*DPR) bullets.splice(i,1);
+    }
+  }
 
   // Main loop
-  let last = 0; function loop(ts){ if(!last) last = ts; const dt = Math.min(0.033, (ts - last)/1000); last = ts; if(game.started && !game.paused){ update(dt); render(); } else { render(); } requestAnimationFrame(loop); }
+  let last = 0; function loop(ts){
+    if(!last) last = ts; const dt = Math.min(0.033, (ts - last)/1000); last = ts;
+    if(game.started && !game.paused){ update(dt); render(); } else { render(); }
+    requestAnimationFrame(loop);
+  }
 
   function update(dt){
     // weapon timer
-    if(weapon.timer>0){ weapon.timer -= dt; if(weapon.timer<=0){ weapon.timer=0; weapon.type='NORMAL'; player.fireDelay=player.baseDelay; } updateWeaponHud(); }
+    if(weapon.timer>0){
+      weapon.timer -= dt;
+      if(weapon.timer<=0){ weapon.timer=0; weapon.type='NORMAL'; player.fireDelay=player.baseDelay; }
+      updateWeaponHud();
+    }
 
-    // player movement (drag sets x directly). Keyboard for desktop
-    let dir = 0; if(keys.left) dir -= 1; if(keys.right) dir += 1; player.x += dir * player.speed * DPR * dt; player.x = clamp(player.x, 14*DPR, playW - 14*DPR);
+    // player movement
+    let dir = 0; if(keys.left) dir -= 1; if(keys.right) dir += 1;
+    player.x += dir * player.speed * DPR * dt;
+    player.x = clamp(player.x, 14*DPR, playW - 14*DPR);
 
     // firing
-    if(keys.fire) attemptShoot(); if(player.cooldown>0) player.cooldown -= dt; if(player.invul>0){ player.invul -= dt; player.blink += dt*10; }
+    if(keys.fire) attemptShoot();
+    if(player.cooldown>0) player.cooldown -= dt;
+    if(player.invul>0){ player.invul -= dt; player.blink += dt*10; }
 
     // boss / wave
     if(game.inBoss && boss){
       boss.x += boss.speed * boss.dir * dt;
       if(boss.x < 8*DPR || boss.x + boss.w > playW - 8*DPR){ boss.dir *= -1; boss.y += 8*DPR; boss.speed *= 1.01; }
-      boss.shotTimer += dt; const baseInt = Math.max(0.22, 0.9 - game.stage*0.06); if(boss.shotTimer > baseInt){ boss.shotTimer = 0; bossShoot(); }
+      boss.shotTimer += dt; const baseInt = Math.max(0.22, 0.9 - game.stage*0.06);
+      if(boss.shotTimer > baseInt){ boss.shotTimer = 0; bossShoot(); }
     } else {
       if(enemies.some(e=>e.alive)){
         enemyBox.x += enemyBox.speed * enemyBox.dir * dt;
         const alive = enemies.filter(e=>e.alive);
         let minX = Infinity, maxX = -Infinity, maxY = -Infinity; const baseX = enemies[0] ? enemies[0].x : 0; const baseY = enemies[0] ? enemies[0].y : 0;
-        for(const e of alive){ const ex = e.x + (enemyBox.x - baseX); const ey = e.y + (enemyBox.y - baseY); minX = Math.min(minX, ex); maxX = Math.max(maxX, ex + e.w); maxY = Math.max(maxY, ey + e.h); }
+        for(const e of alive){
+          const ex = e.x + (enemyBox.x - baseX); const ey = e.y + (enemyBox.y - baseY);
+          minX = Math.min(minX, ex); maxX = Math.max(maxX, ex + e.w); maxY = Math.max(maxY, ey + e.h);
+        }
         if(minX < 8*DPR || maxX > playW - 8*DPR){ enemyBox.dir *= -1; enemyBox.y += enemyBox.step; enemyBox.speed *= 1.02; }
         if(maxY > player.y - 10*DPR){ hitPlayer(); enemyBox.y -= 24*DPR; }
-        lastEnemyShot += dt; const interval = Math.max(0.33, 1.0 - game.stage*0.06); if(lastEnemyShot > interval){ lastEnemyShot = 0; const bottomers = alive.filter(e=> !alive.some(o=>o.col===e.col && o.row>e.row)); if(bottomers.length){ const shooter = bottomers[(Math.random()*bottomers.length)|0]; const baseX2 = enemies[0] ? enemies[0].x : 0; const baseY2 = enemies[0] ? enemies[0].y : 0; enemyShoot({x: shooter.x + (enemyBox.x - baseX2), y: shooter.y + (enemyBox.y - baseY2), w: shooter.w, h: shooter.h}); } }
-      } else { if(!game.inBoss && !boss){ spawnBoss(game.stage); } }
+        lastEnemyShot += dt; const interval = Math.max(0.33, 1.0 - game.stage*0.06);
+        if(lastEnemyShot > interval){
+          lastEnemyShot = 0;
+          const bottomers = alive.filter(e=> !alive.some(o=>o.col===e.col && o.row>e.row));
+          if(bottomers.length){
+            const shooter = bottomers[(Math.random()*bottomers.length)|0];
+            const baseX2 = enemies[0] ? enemies[0].x : 0; const baseY2 = enemies[0] ? enemies[0].y : 0;
+            enemyShoot({x: shooter.x + (enemyBox.x - baseX2), y: shooter.y + (enemyBox.y - baseY2), w: shooter.w, h: shooter.h});
+          }
+        }
+      } else {
+        if(!game.inBoss && !boss){ spawnBoss(game.stage); }
+      }
     }
 
     // bullets
-    for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i];
-      // zigzag sideways flip
+    for(let i=bullets.length-1;i>=0;i--){
+      const b=bullets[i];
       if(b.owner==='enemy' && b.zig){ b.vx += (b.zig ? (Math.random()<0.5?-1:1)*10*DPR*dt : 0); }
-      b.x += b.vx*dt; b.y += b.vy*dt; if(b.y < -60*DPR || b.y > playH + 60*DPR || b.x < -60*DPR || b.x > playW + 60*DPR) bullets.splice(i,1);
+      b.x += b.vx*dt; b.y += b.vy*dt;
+      if(b.y < -60*DPR || b.y > playH + 60*DPR || b.x < -60*DPR || b.x > playW + 60*DPR) bullets.splice(i,1);
     }
 
     // items fall
-    for(let i=items.length-1;i>=0;i--){ const it=items[i]; it.y += it.vy*dt; if(it.y>playH+20*DPR){ items.splice(i,1); continue; } const P={x:player.x - player.w*0.5, y:player.y - player.h*0.5, w:player.w, h:player.h}; if(aabb(it,P)){ grantWeapon(it.type); items.splice(i,1); }}
+    for(let i=items.length-1;i>=0;i--){
+      const it=items[i]; it.y += it.vy*dt;
+      if(it.y>playH+20*DPR){ items.splice(i,1); continue; }
+      const P={x:player.x - player.w*0.5, y:player.y - player.h*0.5, w:player.w, h:player.h};
+      if(aabb(it,P)){ grantWeapon(it.type); items.splice(i,1); }
+    }
 
     // collisions: player bullets vs enemies/boss
-    for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i]; if(b.owner!=='player') continue; let removed=false; if(game.inBoss && boss){ const B = {x:boss.x, y:boss.y, w:boss.w, h:boss.h}; if(aabb(b,B)){ if(!b.pierce){ bullets.splice(i,1); removed=true; } boss.hp -= 8 + Math.floor(game.stage*0.5); updateBossHud(); beep(380,0.05,0.04); if(boss.hp<=0){ game.score += 250 + game.stage*60; elScore.textContent = game.score; boss=null; game.inBoss=false; updateBossHud(); nextStage(); } }}
+    for(let i=bullets.length-1;i>=0;i--){
+      const b=bullets[i]; if(b.owner!=='player') continue; let removed=false;
+      if(game.inBoss && boss){
+        const B = {x:boss.x, y:boss.y, w:boss.w, h:boss.h};
+        if(aabb(b,B)){
+          if(!b.pierce){ bullets.splice(i,1); removed=true; }
+          boss.hp -= 8 + Math.floor(game.stage*0.5);
+          updateBossHud();
+          beep(380,0.05,0.04);
+          if(boss.hp<=0){
+            game.score += 250 + game.stage*60; elScore.textContent = game.score;
+            boss=null; game.inBoss=false; updateBossHud(); nextStage();
+          }
+        }
+      }
       if(removed) continue;
       for(let j=0;j<enemies.length;j++){
-        const e=enemies[j]; if(!e.alive) continue; const baseX = enemies[0] ? enemies[0].x : 0; const baseY = enemies[0] ? enemies[0].y : 0; const ex = e.x + (enemyBox.x - baseX); const ey = e.y + (enemyBox.y - baseY); const E = {x:ex,y:ey,w:e.w,h:e.h}; if(aabb(b,E)){ if(!b.pierce){ bullets.splice(i,1); removed=true; } killEnemy(e, ex+e.w*0.5, ey+e.h*0.5); break; }
+        const e=enemies[j]; if(!e.alive) continue;
+        const baseX = enemies[0] ? enemies[0].x : 0; const baseY = enemies[0] ? enemies[0].y : 0;
+        const ex = e.x + (enemyBox.x - baseX); const ey = e.y + (enemyBox.y - baseY);
+        const E = {x:ex,y:ey,w:e.w,h:e.h};
+        if(aabb(b,E)){
+          if(!b.pierce){ bullets.splice(i,1); removed=true; }
+          killEnemy(e, ex+e.w*0.5, ey+e.h*0.5);
+          break;
+        }
       }
     }
 
     // collisions: enemy/boss bullets vs player
     const P = {x:player.x - player.w*0.5, y:player.y - player.h*0.5, w:player.w, h:player.h};
-    for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i]; if(b.owner!=='player' && aabb(b,P)){ bullets.splice(i,1); hitPlayer(); } }
+    for(let i=bullets.length-1;i>=0;i--){
+      const b=bullets[i]; if(b.owner!=='player' && aabb(b,P)){ bullets.splice(i,1); hitPlayer(); }
+    }
   }
 
-  function render(){ ctx.save(); ctx.clearRect(0,0,canvas.width,canvas.height); drawStars(); if(!game.over){ if(!(player.invul>0 && Math.floor(player.blink)%2===0)){ drawShip(player.x, player.y, player.w, player.h); } }
-    for(const e of enemies){ if(!e.alive) continue; const baseX = enemies[0] ? enemies[0].x : 0; const baseY = enemies[0] ? enemies[0].y : 0; drawEnemy(e.x + (enemyBox.x - baseX), e.y + (enemyBox.y - baseY), e.w, e.h, e.row); }
+  function render(){
+    ctx.save();
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    drawStars();
+    if(!game.over){
+      if(!(player.invul>0 && Math.floor(player.blink)%2===0)){
+        drawShip(player.x, player.y, player.w, player.h);
+      }
+    }
+    for(const e of enemies){
+      if(!e.alive) continue;
+      const baseX = enemies[0] ? enemies[0].x : 0; const baseY = enemies[0] ? enemies[0].y : 0;
+      drawEnemy(e.x + (enemyBox.x - baseX), e.y + (enemyBox.y - baseY), e.w, e.h, e.row);
+    }
     if(game.inBoss && boss){ drawBoss(boss); }
     for(const b of bullets){ drawBullet(b); }
     for(const it of items){ drawItem(it); }
-    ctx.restore(); }
+    ctx.restore();
+  }
 
   // Visuals
   const starField = new Array(120).fill(0).map(()=>({x:Math.random(), y:Math.random(), z:rand(0.2,1)}));
@@ -323,7 +442,7 @@
 
   // Keyboard (desktop)
   window.addEventListener('keydown', (e)=>{ if(e.code==='ArrowLeft' || e.code==='KeyA') { keys.left=true; } if(e.code==='ArrowRight' || e.code==='KeyD') { keys.right=true; } if(e.code==='Space') { keys.fire=true; e.preventDefault(); } if(e.code==='KeyP') togglePause(); });
-  window.addEventListener('keyup', (e)=>{ if(e.code==='ArrowLeft' || e.code==='KeyA') { keys.left=false; } if(e.code==='ArrowRight' || e.code==='KeyD') { keys.right=false; } if(e.code==='Space') { keys.fire=false; } });
+  window.addEventListener('keyup', (e)=>{ if(e.code==='ArrowLeft' || e.code==='KeyA') { keys.left=false; } if(e.code==='ArrowRight' || e.code==='KeyD') { keys.right=false; } });
 
   function togglePause(){ if(!game.started||game.over) return; game.paused = !game.paused; elPause.textContent = game.paused? '▶️ 재개' : '⏸️ 일시정지'; if(!game.paused) ensureAudio(); }
   function toggleMute(){ game.muted = !game.muted; elMute.textContent = game.muted? '🔇 음소거' : '🔊 사운드'; if(!game.muted) ensureAudio(); }
