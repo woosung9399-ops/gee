@@ -125,11 +125,11 @@
   const weapon = { type:'NORMAL', timer:0 };
 
   // Entities
-  const bullets = []; // {x,y,vx,vy,owner:'player'|'enemy'|'boss', w,h, pierce?:bool}
-  let enemies = [];   // {x,y,w,h,alive,row,col}
+  const bullets = []; // {x,y,vx,vy,owner:'player'|'enemy'|'boss', w,h, pierce?:bool, zig?, wave?, grav?}
+  let enemies = [];
   let enemyBox = {x:0,y:0,w:0,h:0, dir:1, speed:40, step:16};
   let lastEnemyShot = 0; let boss = null; // {x,y,w,h,hp,maxHp,dir,speed,phase,shotTimer,angle}
-  const items = []; // {x,y,w,h,vy,type:'SPREAD'|'PIERCE'|'RAPID'}
+  const items = []; // {x,y,w,h,vy,type}
 
   // Dimensions
   let playW = 0, playH = 0;
@@ -163,11 +163,10 @@
   }
 
   function spawnBoss(stage){
-    // HP: 1스테이지 400에서 시작, 스테이지마다 +150
+    // HP: 1스테이지 400, 스테이지마다 +150
     const hp = 400 + (stage - 1) * 150;
     const size = Math.min(120 + stage*10, 200) * DPR;
-    // 스테이지가 오를수록 이동속도도 강화
-    const speed = (40 + stage*10) * DPR;
+    const speed = (40 + stage*10) * DPR; // 이동속도 강화
     boss = { x: playW*0.5 - size*0.5, y: 36*DPR, w: size, h: size*0.6, hp, maxHp: hp, dir: 1, speed, phase: 0, shotTimer: 0, angle: 0 };
     game.inBoss = true; updateBossHud(); beep(200,0.25,0.07); beep(160,0.25,0.06);
   }
@@ -189,7 +188,6 @@
     if(Math.random() < chance){
       const types = ['SPREAD','PIERCE','RAPID'];
       const t = types[(Math.random()*types.length)|0];
-      // 아이템 낙하 속도 빠르게
       items.push({x:x, y:y, w:14*DPR, h:14*DPR, vy: 120*DPR, type:t});
     }
   }
@@ -200,38 +198,41 @@
     const bw = 3*DPR, bh = 10*DPR;
     const make = (offX, offVyMul=1)=> bullets.push({x:player.x + offX - bw*0.5, y:player.y - player.h, w:bw, h:bh, vx:0, vy:baseVy*offVyMul, owner:'player', pierce:(weapon.type==='PIERCE')});
     if(weapon.type==='SPREAD'){
-      // 3-way
       bullets.push({x:player.x - bw*0.5, y:player.y - player.h, w:bw, h:bh, vx:-120*DPR, vy:baseVy*0.95, owner:'player', pierce:false});
       make(0,1);
       bullets.push({x:player.x - bw*0.5, y:player.y - player.h, w:bw, h:bh, vx:120*DPR, vy:baseVy*0.95, owner:'player', pierce:false});
-    } else if(weapon.type==='RAPID'){
-      make(0,1); // same but cooldown lower via fireDelay
-    } else if(weapon.type==='PIERCE'){
-      make(0,1);
-    } else { // NORMAL
-      make(0,1);
-    }
-    player.cooldown = player.fireDelay;
-    beep(880,0.04,0.04);
+    } else if(weapon.type==='RAPID'){ make(0,1); }
+      else if(weapon.type==='PIERCE'){ make(0,1);} else { make(0,1); }
+    player.cooldown = player.fireDelay; beep(880,0.04,0.04);
   }
 
-  // Enemy shots with patterns (spread/zigzag/aimed)
+  // Enemy shots (아래로만 떨어지는 탄 + 다양한 패턴)
   function enemyShoot(from){
     const s = game.stage;
-    // 적 탄속: 스테이지별 가속 강화
-    const base = (240 + s*40) * DPR;
-    const pattern = Math.floor(Math.random()*3); // 0 spread, 1 zigzag, 2 aimed
+    const base = (230 + s*38) * DPR; // 난이도별 낙하 속도
+    const pattern = Math.floor(Math.random()*5); // 0~4 패턴
+    const originX = from.x + from.w*0.5, originY = from.y + from.h;
+
     if(pattern===0){
-      for(let a=-0.25; a<=0.25; a+=0.25){
-        bullets.push({x:from.x + from.w*0.5, y:from.y + from.h, w:4*DPR, h:10*DPR, vx:Math.sin(a)*base, vy:Math.cos(a)*base, owner:'enemy'});
-      }
+      // 0) 스트레이트 레인: 직하
+      bullets.push({x:originX, y:originY, w:4*DPR, h:10*DPR, vx:0, vy:base, owner:'enemy'});
     } else if(pattern===1){
-      // zigzag
+      // 1) 드리프트: 서서히 좌/우로 기울며 하강
+      const drift = (Math.random()<0.5?-1:1) * (40 + s*4) * DPR;
+      bullets.push({x:originX, y:originY, w:4*DPR, h:10*DPR, vx:drift*0.3, vy:base, owner:'enemy'});
+    } else if(pattern===2){
+      // 2) 지그재그: 좌우로 흔들리며 하강
       const vx = (Math.random()<0.5?-1:1) * (80 + s*6) * DPR;
-      bullets.push({x:from.x + from.w*0.5, y:from.y + from.h, w:4*DPR, h:10*DPR, vx, vy:base*0.9, owner:'enemy', zig:1});
+      bullets.push({x:originX, y:originY, w:4*DPR, h:10*DPR, vx, vy:base*0.9, owner:'enemy', zig:1});
+    } else if(pattern===3){
+      // 3) 웨이브: 사인파로 좌우 이동하며 하강
+      const amp = (60 + s*6) * DPR; // 좌우 속도 진폭(px/s)
+      const freq = 1.6 + s*0.06;   // 진동수(Hz 유사)
+      bullets.push({x:originX, y:originY, w:4*DPR, h:10*DPR, vx:0, vy:base*0.92, owner:'enemy', wave:{amp, freq, t:0}});
     } else {
-      const V = aimVec(from.x + from.w*0.5, from.y + from.h, player.x, player.y, base*1.05);
-      bullets.push({x:from.x + from.w*0.5, y:from.y + from.h, w:4*DPR, h:10*DPR, vx:V.vx, vy:V.vy, owner:'enemy'});
+      // 4) 가속 낙하: 떨어지면서 점점 빨라짐
+      const grav = (200 + s*30) * DPR; // 가속도(px/s^2)
+      bullets.push({x:originX, y:originY, w:4*DPR, h:10*DPR, vx:0, vy:base*0.75, owner:'enemy', grav});
     }
     beep(260,0.06,0.035);
   }
@@ -240,53 +241,28 @@
   function bossShoot(){
     if(!boss) return;
     const s = game.stage;
-    const cx = boss.x + boss.w*0.5;
-    const cy = boss.y + boss.h*0.5;
-    // 회전 속도 강화
-    boss.angle += 0.25 + s*0.03;
+    const cx = boss.x + boss.w*0.5; const cy = boss.y + boss.h*0.5;
+    boss.angle += 0.25 + s*0.03; // 회전 속도 강화
     const pick = (s % 4);
-    // 탄속 강화
-    const speedBase = (250 + s*45) * DPR;
+    const speedBase = (250 + s*45) * DPR; // 탄속 강화
     switch(pick){
       case 1: // spiral (연속)
-        for(let k=0;k<5;k++){
-          const ang = (boss.angle + k*0.5);
-          const vx = Math.sin(ang)*speedBase, vy=Math.cos(ang)*speedBase;
-          bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});
-        }
+        for(let k=0;k<5;k++){ const ang = (boss.angle + k*0.5); const vx = Math.sin(ang)*speedBase, vy=Math.cos(ang)*speedBase; bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'}); }
         break;
       case 2: // 조준 벌스트
-        for(let i=0;i<4+Math.floor(s*0.4);i++){
-          const spread = (-0.2 + (i/Math.max(1,3+Math.floor(s*0.4)))*0.4);
-          const V = aimVec(cx, cy, player.x, player.y, speedBase);
-          const vx = V.vx + Math.sin(spread)*100*DPR; const vy = V.vy + Math.cos(spread)*60*DPR;
-          bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});
-        }
+        for(let i=0;i<4+Math.floor(s*0.4);i++){ const spread = (-0.2 + (i/Math.max(1,3+Math.floor(s*0.4)))*0.4); const V = aimVec(cx, cy, player.x, player.y, speedBase); const vx = V.vx + Math.sin(spread)*100*DPR; const vy = V.vy + Math.cos(spread)*60*DPR; bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});} 
         break;
       case 3: // 스윕 아크(부채꼴)
-        for(let a=-0.6;a<=0.6;a+=0.1){
-          const ang = a + Math.sin(boss.angle*0.6)*0.5;
-          const vx=Math.sin(ang)*speedBase, vy=Math.cos(ang)*speedBase;
-          bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});
-        }
+        for(let a=-0.6;a<=0.6;a+=0.1){ const ang = a + Math.sin(boss.angle*0.6)*0.5; const vx=Math.sin(ang)*speedBase, vy=Math.cos(ang)*speedBase; bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});} 
         break;
       default: // 링 탄막
-        const n = 12 + Math.floor(s*0.6);
-        for(let i=0;i<n;i++){
-          const ang = (i/n)*Math.PI*2;
-          const vx=Math.sin(ang)*speedBase, vy=Math.cos(ang)*speedBase;
-          bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});
-        }
+        const n = 12 + Math.floor(s*0.6); for(let i=0;i<n;i++){ const ang = (i/n)*Math.PI*2; const vx=Math.sin(ang)*speedBase, vy=Math.cos(ang)*speedBase; bullets.push({x:cx, y:cy, w:4*DPR, h:10*DPR, vx, vy, owner:'boss'});} 
     }
     beep(180,0.08,0.05);
   }
 
-  function killEnemy(e, worldX, worldY){
-    e.alive=false; game.score += 10 + Math.floor((8 - e.row) * 0.5); elScore.textContent = game.score; maybeDropItem(worldX, worldY); beep(520,0.05,0.05);
-  }
-  function hitPlayer(){
-    if(player.invul>0) return; game.lives--; refreshLives(); if(game.lives<=0){ gameOver(); return; } player.invul = 1.6; player.blink = 0; beep(120,0.18,0.04); for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i]; if(b.owner!=='player' && b.y>player.y-60*DPR) bullets.splice(i,1); }
-  }
+  function killEnemy(e, worldX, worldY){ e.alive=false; game.score += 10 + Math.floor((8 - e.row) * 0.5); elScore.textContent = game.score; maybeDropItem(worldX, worldY); beep(520,0.05,0.05); }
+  function hitPlayer(){ if(player.invul>0) return; game.lives--; refreshLives(); if(game.lives<=0){ gameOver(); return; } player.invul = 1.6; player.blink = 0; beep(120,0.18,0.04); for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i]; if(b.owner!=='player' && b.y>player.y-60*DPR) bullets.splice(i,1); } }
 
   // Main loop
   let last = 0; function loop(ts){ if(!last) last = ts; const dt = Math.min(0.033, (ts - last)/1000); last = ts; if(game.started && !game.paused){ update(dt); render(); } else { render(); } requestAnimationFrame(loop); }
@@ -305,8 +281,7 @@
     if(game.inBoss && boss){
       boss.x += boss.speed * boss.dir * dt;
       if(boss.x < 8*DPR || boss.x + boss.w > playW - 8*DPR){ boss.dir *= -1; boss.y += 8*DPR; boss.speed *= 1.01; }
-      // 발사 간격도 스테이지가 오를수록 짧게 (더 자주 발사)
-      boss.shotTimer += dt; const baseInt = Math.max(0.18, 0.9 - game.stage*0.07);
+      boss.shotTimer += dt; const baseInt = Math.max(0.18, 0.9 - game.stage*0.07); // 더 자주 발사
       if(boss.shotTimer > baseInt){ boss.shotTimer = 0; bossShoot(); }
     } else {
       if(enemies.some(e=>e.alive)){
@@ -316,12 +291,25 @@
         for(const e of alive){ const ex = e.x + (enemyBox.x - baseX); const ey = e.y + (enemyBox.y - baseY); minX = Math.min(minX, ex); maxX = Math.max(maxX, ex + e.w); maxY = Math.max(maxY, ey + e.h); }
         if(minX < 8*DPR || maxX > playW - 8*DPR){ enemyBox.dir *= -1; enemyBox.y += enemyBox.step; enemyBox.speed *= 1.02; }
         if(maxY > player.y - 10*DPR){ hitPlayer(); enemyBox.y -= 24*DPR; }
-        lastEnemyShot += dt; const interval = Math.max(0.33, 1.0 - game.stage*0.06); if(lastEnemyShot > interval){ lastEnemyShot = 0; const bottomers = alive.filter(e=> !alive.some(o=>o.col===e.col && o.row>e.row)); if(bottomers.length){ const shooter = bottomers[(Math.random()*bottomers.length)|0]; const baseX2 = enemies[0] ? enemies[0].x : 0; const baseY2 = enemies[0] ? enemies[0].y : 0; enemyShoot({x: shooter.x + (enemyBox.x - baseX2), y: shooter.y + (enemyBox.y - baseY2), w: shooter.w, h: shooter.h}); } }
+        lastEnemyShot += dt; const interval = Math.max(0.33, 1.0 - game.stage*0.06);
+        if(lastEnemyShot > interval){ lastEnemyShot = 0; const bottomers = alive.filter(e=> !alive.some(o=>o.col===e.col && o.row>e.row)); if(bottomers.length){ const shooter = bottomers[(Math.random()*bottomers.length)|0]; const baseX2 = enemies[0] ? enemies[0].x : 0; const baseY2 = enemies[0] ? enemies[0].y : 0; enemyShoot({x: shooter.x + (enemyBox.x - baseX2), y: shooter.y + (enemyBox.y - baseY2), w: shooter.w, h: shooter.h}); } }
       } else { if(!game.inBoss && !boss){ spawnBoss(game.stage); } }
     }
 
     // bullets update
-    for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i]; if(b.owner==='enemy' && b.zig){ b.vx += (b.zig ? (Math.random()<0.5?-1:1)*10*DPR*dt : 0); } b.x += b.vx*dt; b.y += b.vy*dt; if(b.y < -60*DPR || b.y > playH + 60*DPR || b.x < -60*DPR || b.x > playW + 60*DPR) bullets.splice(i,1); }
+    for(let i=bullets.length-1;i>=0;i--){
+      const b=bullets[i];
+      // 적 탄의 좌우 변형 처리
+      if(b.owner==='enemy'){
+        if(b.zig){ b.vx += (Math.random()<0.5?-1:1)*10*DPR*dt; }
+        if(b.wave){ b.wave.t += dt; b.vx = Math.sin(b.wave.t * b.wave.freq) * b.wave.amp; }
+        if(b.grav){ b.vy += b.grav * dt; }
+        // 항상 아래로만: vy가 양수 유지
+        if(b.vy < 0) b.vy = Math.abs(b.vy);
+      }
+      b.x += b.vx*dt; b.y += b.vy*dt;
+      if(b.y < -60*DPR || b.y > playH + 60*DPR || b.x < -60*DPR || b.x > playW + 60*DPR) bullets.splice(i,1);
+    }
 
     // items fall
     for(let i=items.length-1;i>=0;i--){ const it=items[i]; it.y += it.vy*dt; if(it.y>playH+20*DPR){ items.splice(i,1); continue; } const P={x:player.x - player.w*0.5, y:player.y - player.h*0.5, w:player.w, h:player.h}; if(aabb(it,P)){ grantWeapon(it.type); items.splice(i,1); }}
